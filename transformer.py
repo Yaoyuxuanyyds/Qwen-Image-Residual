@@ -67,6 +67,7 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         guidance: torch.Tensor = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
+        target_layers: Optional[List[int]] = None,
     ):
 
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 下面保持与官方一致（删除了 LoRA backend） ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
@@ -79,6 +80,11 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         timestep = timestep.to(hidden_states.dtype)
         encoder_hidden_states = self.txt_norm(encoder_hidden_states)
         encoder_hidden_states = self.txt_in(encoder_hidden_states)
+
+        collect_txt_features = target_layers is not None and len(target_layers) > 0
+        target_layers = sorted(set(target_layers)) if collect_txt_features else []
+        txt_feats_list: List[torch.Tensor] = []
+        context_embedder_output: List[torch.Tensor] = []
 
         if guidance is not None:
             guidance = guidance.to(hidden_states.dtype) * 1000
@@ -102,6 +108,9 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         )
 
         target_set = set(self.residual_target_layers)
+
+        if collect_txt_features:
+            context_embedder_output.append(encoder_hidden_states.detach())
 
         for layer_idx, block in enumerate(self.transformer_blocks):
 
@@ -130,6 +139,9 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
                 joint_attention_kwargs=attention_kwargs,
             )
 
+            if collect_txt_features and layer_idx in target_layers:
+                txt_feats_list.append(encoder_hidden_states.detach())
+
         # 清空缓存
         self._saved_origin_text = None
 
@@ -137,6 +149,14 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
 
         hidden_states = self.norm_out(hidden_states, temb)
         output = self.proj_out(hidden_states)
+
+        if collect_txt_features:
+            # 当需要文本特征时，总是返回字典，便于可视化脚本读取
+            return {
+                "sample": output,
+                "txt_feats_list": txt_feats_list,
+                "context_embedder_output": context_embedder_output,
+            }
 
         if not return_dict:
             return (output,)
