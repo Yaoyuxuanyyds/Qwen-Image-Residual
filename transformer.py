@@ -70,8 +70,6 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         target_layers: Optional[List[int]] = None,
     ):
 
-        # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 下面保持与官方一致（删除了 LoRA backend） ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
 

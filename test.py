@@ -47,14 +47,27 @@ aspect_ratios = {
 
 width, height = aspect_ratios["16:9"]
 
-image = pipe(
+# image = pipe(
+#     prompt=prompt + positive_magic["en"],
+#     negative_prompt=negative_prompt,
+#     width=width,
+#     height=height,
+#     num_inference_steps=50,
+#     true_cfg_scale=4.0,
+#     generator=torch.Generator(device="cuda").manual_seed(42),
+
+out = pipe(
     prompt=prompt + positive_magic["en"],
     negative_prompt=negative_prompt,
     width=width,
     height=height,
     num_inference_steps=50,
     true_cfg_scale=4.0,
-    generator=torch.Generator(device="cuda").manual_seed(42)
-).images[0]
+    generator=torch.Generator(device="cuda").manual_seed(42),
+    collect_layers=[1, 2, 3],
+    target_timestep=25
+)
+image = out['images'][0]
+text_tokens = out['text_layer_outputs']
 
 image.save("example-test.png")
