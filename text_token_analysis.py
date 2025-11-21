@@ -219,6 +219,18 @@ def iterate_pairs(dataset, total, args):
         for i in range(total):
             img, txt = extract_pair(dataset[i])
             yield i, img, txt
+            
+def fix_feat_shape(f: torch.Tensor) -> torch.Tensor:
+    """
+    将 [1, T, D] 或 [B, T, D] 变成 [T, D]。
+    """
+    if f.dim() == 3:
+        if f.shape[0] == 1:
+            return f.squeeze(0)   # [1,T,D] → [T,D]
+        else:
+            # [B,T,D] → 展平 batch → 合并
+            return f.reshape(-1, f.shape[-1])
+    return f
 
 
 # ================================================================
@@ -258,8 +270,8 @@ def run(args):
         out = pipe(
             prompt=prompt,
             negative_prompt=" ",
-            width=1024,
-            height=1024,
+            width=args.width,
+            height=args.height,
             true_cfg_scale=4.0,
             generator=torch.Generator(device="cuda").manual_seed(42),
             collect_layers=target_layers,
@@ -270,13 +282,13 @@ def run(args):
         txt_dict = out["text_layer_outputs"]
 
         # Layer 0
-        layer0 = txt_dict[0][-1].float()   # last = target timestep
+        layer0 = fix_feat_shape(txt_dict[0][-1].float())
         layer0_all.append(layer0.cpu())
         token_lengths.append(layer0.shape[0])
 
         # Other layers
         for l in target_layers:
-            feats = txt_dict[l][-1].float()  # target_timestep
+            feats = fix_feat_shape(txt_dict[l][-1].float())
             layerX_all[l].append(feats.cpu())
 
             ckn = cknna(feats, layer0, topk=args.topk, unbiased=args.unbiased)

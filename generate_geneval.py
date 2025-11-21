@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument("--outdir", type=str, required=True)
 
     parser.add_argument("--n_samples", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--skip_grid", action="store_true")
 
