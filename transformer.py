@@ -1,0 +1,144 @@
+import torch
+import torch.nn as nn
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+from diffusers.models import QwenImageTransformer2DModel
+from diffusers.utils import logging
+from diffusers.models.modeling_outputs import Transformer2DModelOutput
+
+logger = logging.get_logger(__name__)
+
+
+class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
+    """
+    增加 text stream 的跨层 residual 注入功能
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.residual_origin_layer: Optional[int] = None
+        self.residual_target_layers: List[int] = []
+        self.residual_weights: Optional[torch.Tensor] = None
+
+        self._saved_origin_text: Optional[torch.Tensor] = None
+
+    def set_residual_config(
+        self,
+        residual_origin_layer: Optional[int],
+        residual_target_layers: Optional[Union[List[int], torch.Tensor]],
+        residual_weights: Optional[Union[List[float], torch.Tensor]],
+    ):
+        if residual_origin_layer is None:
+            # 禁用 residual
+            self.residual_origin_layer = None
+            self.residual_target_layers = []
+            self.residual_weights = None
+            self._saved_origin_text = None
+            return
+
+        # layers
+        if isinstance(residual_target_layers, torch.Tensor):
+            residual_target_layers = residual_target_layers.tolist()
+        self.residual_target_layers = [int(i) for i in residual_target_layers]
+
+        # weights
+        if isinstance(residual_weights, (list, tuple)):
+            residual_weights = torch.tensor(residual_weights, dtype=torch.float32)
+        self.residual_weights = residual_weights
+
+        self.residual_origin_layer = int(residual_origin_layer)
+        self._saved_origin_text = None
+
+        logger.info(
+            f"[Residual] origin={self.residual_origin_layer}, "
+            f"targets={self.residual_target_layers}, "
+            f"weights={self.residual_weights}"
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor = None,
+        encoder_hidden_states_mask: torch.Tensor = None,
+        timestep: torch.LongTensor = None,
+        img_shapes: Optional[List[Tuple[int, int, int]]] = None,
+        txt_seq_lens: Optional[List[int]] = None,
+        guidance: torch.Tensor = None,
+        attention_kwargs: Optional[Dict[str, Any]] = None,
+        return_dict: bool = True,
+    ):
+
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 下面保持与官方一致（删除了 LoRA backend） ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+        if attention_kwargs is not None:
+            attention_kwargs = attention_kwargs.copy()
+
+        hidden_states = self.img_in(hidden_states)
+
+        timestep = timestep.to(hidden_states.dtype)
+        encoder_hidden_states = self.txt_norm(encoder_hidden_states)
+        encoder_hidden_states = self.txt_in(encoder_hidden_states)
+
+        if guidance is not None:
+            guidance = guidance.to(hidden_states.dtype) * 1000
+
+        temb = (
+            self.time_text_embed(timestep, hidden_states)
+            if guidance is None
+            else self.time_text_embed(timestep, guidance, hidden_states)
+        )
+
+        image_rotary_emb = self.pos_embed(img_shapes, txt_seq_lens, device=hidden_states.device)
+
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 在 Transformer 层循环中加入 residual 逻辑 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+        self._saved_origin_text = None  # 每次 forward 清空
+
+        use_residual = (
+            self.residual_origin_layer is not None
+            and self.residual_weights is not None
+            and len(self.residual_target_layers) > 0
+        )
+
+        target_set = set(self.residual_target_layers)
+
+        for layer_idx, block in enumerate(self.transformer_blocks):
+
+            # 1. origin layer：保存 text tokens 输入
+            if use_residual and layer_idx == self.residual_origin_layer:
+                self._saved_origin_text = encoder_hidden_states.detach()
+
+            # 2. target layers：注入 residual
+            if use_residual and layer_idx in target_set and self._saved_origin_text is not None:
+                tid = self.residual_target_layers.index(layer_idx)
+                w = self.residual_weights[tid].to(
+                    encoder_hidden_states.device, encoder_hidden_states.dtype
+                )
+
+                encoder_hidden_states = (
+                    encoder_hidden_states + w * self._saved_origin_text
+                )
+
+            # 3. 正常执行 block
+            encoder_hidden_states, hidden_states = block(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states_mask=encoder_hidden_states_mask,
+                temb=temb,
+                image_rotary_emb=image_rotary_emb,
+                joint_attention_kwargs=attention_kwargs,
+            )
+
+        # 清空缓存
+        self._saved_origin_text = None
+
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 剩余部分保持官方一致 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+        hidden_states = self.norm_out(hidden_states, temb)
+        output = self.proj_out(hidden_states)
+
+        if not return_dict:
+            return (output,)
+
+        return Transformer2DModelOutput(sample=output)
