@@ -10,14 +10,14 @@ cd /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval
 # ============================================================
 # =============== 参数列表（可自由扩展） =====================
 # ============================================================
-RES_ORIGIN_LIST=(1)
+RES_ORIGIN_LIST=(30)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 3 59)"
+    "$(seq -s ' ' 31 59)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.1 %.0s' $(seq 3 59))"
+    "$(printf '0.1 %.0s' $(seq 31 59))"
 )
 
 
@@ -51,7 +51,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
 
 
     GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"

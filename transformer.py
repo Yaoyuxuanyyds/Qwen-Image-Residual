@@ -23,6 +23,20 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
 
         self._saved_origin_text: Optional[torch.Tensor] = None
 
+    @staticmethod
+    def _standardize_tokenwise(x: torch.Tensor, eps: float = 1e-6):
+        """
+        对最后一维 (hidden_dim) 做 z-score：
+        x_norm = (x - mean) / (std + eps)
+        返回 (x_norm, mean, std)，方便之后把 scale/shift 加回去。
+        形状保持和 x 一致。
+        """
+        mean = x.mean(dim=-1, keepdim=True)
+        std = x.std(dim=-1, keepdim=True)
+        x_norm = (x - mean) / (std + eps)
+        return x_norm, mean, std
+
+
     def set_residual_config(
         self,
         residual_origin_layer: Optional[int],
@@ -30,7 +44,6 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         residual_weights: Optional[Union[List[float], torch.Tensor]],
     ):
         if residual_origin_layer is None:
-            # 禁用 residual
             self.residual_origin_layer = None
             self.residual_target_layers = []
             self.residual_weights = None
@@ -76,6 +89,7 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         hidden_states = self.img_in(hidden_states)
 
         timestep = timestep.to(hidden_states.dtype)
+        
         encoder_hidden_states = self.txt_norm(encoder_hidden_states)
         encoder_hidden_states = self.txt_in(encoder_hidden_states)
 
@@ -94,8 +108,6 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
         )
 
         image_rotary_emb = self.pos_embed(img_shapes, txt_seq_lens, device=hidden_states.device)
-
-        # ↓↓↓↓↓↓↓↓↓↓↓↓↓ 在 Transformer 层循环中加入 residual 逻辑 ↓↓↓↓↓↓↓↓↓↓↓↓↓↓
 
         self._saved_origin_text = None  # 每次 forward 清空
 
@@ -116,16 +128,49 @@ class MyQwenImageTransformer2DModel(QwenImageTransformer2DModel):
             if use_residual and layer_idx == self.residual_origin_layer:
                 self._saved_origin_text = encoder_hidden_states.detach()
 
-            # 2. target layers：注入 residual
+            # # 2. target layers：注入 residual
+            # if use_residual and layer_idx in target_set and self._saved_origin_text is not None:
+            #     tid = self.residual_target_layers.index(layer_idx)
+            #     w = self.residual_weights[tid].to(
+            #         encoder_hidden_states.device, encoder_hidden_states.dtype
+            #     )
+
+            #     encoder_hidden_states = (
+            #         encoder_hidden_states + w * self._saved_origin_text
+            #     )
+            # 2. target layers：注入 residual（标准化 → 残差 → LN → rescale & reshift）
             if use_residual and layer_idx in target_set and self._saved_origin_text is not None:
+
                 tid = self.residual_target_layers.index(layer_idx)
                 w = self.residual_weights[tid].to(
                     encoder_hidden_states.device, encoder_hidden_states.dtype
                 )
 
-                encoder_hidden_states = (
-                    encoder_hidden_states + w * self._saved_origin_text
+                # 当前层 (target) text tokens
+                target = encoder_hidden_states
+                # origin layer 中保存的 text tokens
+                origin = self._saved_origin_text.to(
+                    encoder_hidden_states.device, encoder_hidden_states.dtype
                 )
+
+                # === 1) origin 与 target 各自 token-wise 标准化 (z-score) ===
+                target_norm, target_mean, target_std = self._standardize_tokenwise(target)
+                origin_norm, _, _ = self._standardize_tokenwise(origin)
+
+                # === 2) 在标准化空间中 residual ===
+                mixed_norm = target_norm + w * origin_norm
+
+                # === 3) 对 residual 结果做一次 LayerNorm ===
+                # LN 在最后一维 hidden_dim 上做归一化
+                mixed_norm_ln = torch.nn.functional.layer_norm(
+                    mixed_norm, 
+                    normalized_shape=mixed_norm.shape[-1:],
+                    eps=1e-6
+                )
+
+                # === 4) 用 target 的 mean/std 恢复回 target layer 的原始分布 ===
+                encoder_hidden_states = mixed_norm_ln * target_std + target_mean
+
 
             # 3. 正常执行 block
             encoder_hidden_states, hidden_states = block(

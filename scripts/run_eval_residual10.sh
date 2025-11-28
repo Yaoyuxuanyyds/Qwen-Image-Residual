@@ -27,11 +27,11 @@ BATCHSIZE=16
 RES_ORIGIN_LIST=(1)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 2 24)"
+    "$(seq -s ' ' 3 22)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.5 %.0s' $(seq 2 24))"
+    "$(printf '0.1 %.0s' $(seq 3 22))"
 )
 
 
@@ -72,10 +72,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
-
-
-
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
 
     SAVEDIR="${BASE_SAVE_DIR}/${EXP_NAME}"
     GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"
@@ -150,7 +147,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     done
 
     wait
-    echo "🎉 T2I generation finished."
+    echo "🎉 T2I multi-GPU generation finished."
 
     # # # sample.py 生成图片
     # # echo "📌 Running Basic bench generation..."
@@ -175,12 +172,6 @@ done
 
 echo "🎉🎉 All residual experiments completed!"
 echo
-
-
-
-
-
-
 
 
 

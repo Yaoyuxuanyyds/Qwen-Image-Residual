@@ -7,14 +7,14 @@ set -euo pipefail
 # ============================================================
 # =============== 参数列表（可自由扩展） =====================
 # ============================================================
-RES_ORIGIN_LIST=(1)
+RES_ORIGIN_LIST=(30)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 3 59)"
+    "$(seq -s ' ' 31 59)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.1 %.0s' $(seq 3 59))"
+    "$(printf '0.1 %.0s' $(seq 31 59))"
 )
 
 
@@ -47,7 +47,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
 
     DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
 
@@ -93,8 +93,8 @@ for DPG_OUTDIR in "${DPG_DIR_LIST[@]}"; do
 
     python compute_dpg_bench.py \
         --image-root-path "$DPG_OUTDIR" \
-        --res-path "$DPG_EVAL_RES" \
         --resolution $DPG_RESOLUTION
+        # --res-path "$DPG_EVAL_RES" \
 
     echo "DPG evaluation finished: $DPG_OUTDIR"
     echo "    → Log file: "$DPG_EVAL_RES""

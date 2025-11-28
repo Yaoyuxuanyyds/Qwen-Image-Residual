@@ -27,11 +27,11 @@ BATCHSIZE=16
 RES_ORIGIN_LIST=(1)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 3 44)"
+    "$(seq -s ' ' 2 24)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.5 %.0s' $(seq 3 44))"
+    "$(printf '0.1 %.0s' $(seq 2 24))"
 )
 
 
@@ -72,7 +72,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
 
 
 
@@ -82,37 +82,37 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
     T2I_OUTDIR="${BASE_T2I_DIR}/${EXP_NAME}"
 
-    # mkdir -p "$SAVEDIR" "$GENEVAL_OUTDIR" "$DPG_OUTDIR" "$T2I_OUTDIR"
+    mkdir -p "$SAVEDIR" "$GENEVAL_OUTDIR" "$DPG_OUTDIR" "$T2I_OUTDIR"
 
-    # echo "→ SAVEDIR:        $SAVEDIR"
-    # echo "→ GENEVAL_OUTDIR: $GENEVAL_OUTDIR"
-    # echo "→ DPG_OUTDIR:     $DPG_OUTDIR"
-    # echo "→ T2I_OUTDIR:     $T2I_OUTDIR"
+    echo "→ SAVEDIR:        $SAVEDIR"
+    echo "→ GENEVAL_OUTDIR: $GENEVAL_OUTDIR"
+    echo "→ DPG_OUTDIR:     $DPG_OUTDIR"
+    echo "→ T2I_OUTDIR:     $T2I_OUTDIR"
 
 
-    # # ① Geneval 多卡并行生成
-    # echo "📌 Running GenEval bench generation (multi-GPU)..."
+    # ① Geneval 多卡并行生成
+    echo "📌 Running GenEval bench generation (multi-GPU)..."
 
-    # WORLD_SIZE=8   # 你要用的 GPU 数量（可改成你自己的量）
+    WORLD_SIZE=8   # 你要用的 GPU 数量（可改成你自己的量）
 
-    # for RANK in $(seq 0 $((WORLD_SIZE-1))); do
-    #     CUDA_VISIBLE_DEVICES=$RANK python generate_geneval.py \
-    #         --seed 42 \
-    #         --batch_size $BATCHSIZE \
-    #         --model_dir $MODEL_DIR \
-    #         --metadata_file /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/prompts/evaluation_metadata.jsonl \
-    #         --outdir "$GENEVAL_OUTDIR" \
-    #         --residual_target_layers $RES_TARGET \
-    #         --residual_origin_layer $RES_ORIGIN \
-    #         --residual_weight $RES_WEIGHT \
-    #         --world_size $WORLD_SIZE \
-    #         --rank $RANK \
-    #         --skip_grid \
-    #         > "${GENEVAL_OUTDIR}/log_rank${RANK}.txt" 2>&1 &
-    # done
+    for RANK in $(seq 0 $((WORLD_SIZE-1))); do
+        CUDA_VISIBLE_DEVICES=$RANK python generate_geneval.py \
+            --seed 42 \
+            --batch_size $BATCHSIZE \
+            --model_dir $MODEL_DIR \
+            --metadata_file /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/prompts/evaluation_metadata.jsonl \
+            --outdir "$GENEVAL_OUTDIR" \
+            --residual_target_layers $RES_TARGET \
+            --residual_origin_layer $RES_ORIGIN \
+            --residual_weight $RES_WEIGHT \
+            --world_size $WORLD_SIZE \
+            --rank $RANK \
+            --skip_grid \
+            > "${GENEVAL_OUTDIR}/log_rank${RANK}.txt" 2>&1 &
+    done
 
-    # wait
-    # echo "🎉 GenEval multi-GPU generation finished!"
+    wait
+    echo "🎉 GenEval multi-GPU generation finished!"
 
 
 
@@ -135,22 +135,22 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
 
 
 
-    # echo "📌 Running Multi-GPU Generation..."
-    # WORLD_SIZE=8
-    # for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
-    #     CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
-    #         --outdir_base "${T2I_OUTDIR}" \
-    #         --output_prefix "qwen_residual" \
-    #         --residual_target_layers $RES_TARGET \
-    #         --residual_origin_layer $RES_ORIGIN \
-    #         --residual_weight $RES_WEIGHT \
-    #         --world_size $WORLD_SIZE \
-    #         --rank $GPU_ID \
-    #         > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
-    # done
+    echo "📌 Running Multi-GPU Generation..."
+    WORLD_SIZE=8
+    for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
+        CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
+            --outdir_base "${T2I_OUTDIR}" \
+            --output_prefix "qwen_residual" \
+            --residual_target_layers $RES_TARGET \
+            --residual_origin_layer $RES_ORIGIN \
+            --residual_weight $RES_WEIGHT \
+            --world_size $WORLD_SIZE \
+            --rank $GPU_ID \
+            > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
+    done
 
-    # wait
-    # echo "🎉 T2I generation finished."
+    wait
+    echo "🎉 T2I generation finished."
 
     # # # sample.py 生成图片
     # # echo "📌 Running Basic bench generation..."
@@ -185,108 +185,3 @@ echo
 
 
 
-
-
-# ============================================================
-# =============== 阶段 2：Geneval 测评 =======================
-# ============================================================
-echo "============================================"
-echo " Phase 2: Running Geneval evaluation "
-echo "============================================"
-
-conda activate geneval_1
-cd /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval
-
-MASK2FORMER_PATH="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/mask2former"
-
-for GENEVAL_OUTDIR in "${GENEVAL_DIR_LIST[@]}"; do
-    echo "----------------------------------------------------"
-    echo " Evaluating Geneval directory:"
-    echo "   $GENEVAL_OUTDIR"
-    echo "----------------------------------------------------"
-
-    STEP_NAME=$(basename "$GENEVAL_OUTDIR")
-    OUTFILE_PARENT=$(dirname "$GENEVAL_OUTDIR")
-    GENEVAL_OUTFILE="${OUTFILE_PARENT}/results_${STEP_NAME}.jsonl"
-
-    python evaluation/evaluate_images.py \
-        "$GENEVAL_OUTDIR" \
-        --outfile "$GENEVAL_OUTFILE" \
-        --model-path "$MASK2FORMER_PATH"
-
-    python evaluation/summary_scores.py \
-        "$GENEVAL_OUTFILE"
-
-    echo "🎉 Geneval evaluation finished: $STEP_NAME"
-    echo
-done
-
-
-
-
-
-# # ============================================================
-# # =============== 阶段 3：sample.py 结果测评 =================
-# # ============================================================
-# echo "============================================"
-# echo " Phase 3: Evaluating sample.py generated images "
-# echo "============================================"
-
-# # ⚠ 回到 repa-sd3 环境运行 eval.py
-# conda activate repa-sd3
-# cd /inspire/hdd/project/chineseculture/public/yuxuan/REPA-sd3
-
-# for SAVEDIR in "${SAMPLE_DIR_LIST[@]}"; do
-
-#     echo "----------------------------------------------------"
-#     echo "Running eval.py for:"
-#     echo "    $SAVEDIR"
-#     echo "----------------------------------------------------"
-
-#     python eval.py \
-#         --load_dir "$SAVEDIR" \
-#         --datadir "$DATADIR" \
-#         --load_name "${DATASET}-cfg${CFG}-nfe${NFE}" \
-#         --benchmark $BENCHMARKS \
-#         --num $NUM_SAMPLES
-
-#     echo "🎉 eval.py finished for: $SAVEDIR"
-#     echo
-# done
-
-
-# # ============================================================
-# # =============== 阶段 4：DPG Bench 测评 =============
-# # ============================================================
-# echo "============================================"
-# echo " Phase 4: Running DPG Bench evaluation (official) "
-# echo "============================================"
-
-# DPG_BENCH_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench"
-# DPG_RESOLUTION=1024   # 单格尺寸，官方要求
-
-
-# cd /inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench
-# source /inspire/hdd/project/chineseculture/public/yuxuan/REPA-sd3-1/ELLA/.venv/bin/activate
-
-
-# # 为每个 residual 实验进行 DPG 测评
-# for DPG_OUTDIR in "${DPG_DIR_LIST[@]}"; do
-
-#     DPG_EVAL_RES="${DPG_SAVE_BASE}/results/${EXP_NAME}.txt"
-
-#     echo "----------------------------------------------------"
-#     echo " Evaluating DPG directory: $DPG_OUTDIR"
-#     echo "----------------------------------------------------"
-
-#     python compute_dpg_bench.py \
-#         --image-root-path "$DPG_OUTDIR" \
-#         --res-path "$DPG_EVAL_RES" \
-#         --resolution $DPG_RESOLUTION
-
-#     echo "DPG evaluation finished: $DPG_OUTDIR"
-#     echo "    → Log file: "$DPG_EVAL_RES"
-#     echo
-# done
-
-# echo "🎉 All DPG Bench evaluations completed!"

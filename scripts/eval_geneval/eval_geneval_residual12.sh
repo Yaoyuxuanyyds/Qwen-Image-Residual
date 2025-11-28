@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+source /inspire/hdd/project/chineseculture/public/yuxuan/miniconda3/etc/profile.d/conda.sh
+conda activate geneval_1
+cd /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval
 
 
 
@@ -10,26 +13,20 @@ set -euo pipefail
 RES_ORIGIN_LIST=(0)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 2)"
+    "$(seq -s ' ' 1 59)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.0 %.0s' $(seq 2))"
+    "$(printf '0.1 %.0s' $(seq 1 59))"
 )
 
 
-# =============== 输出目录配置 ===============================
-BASE_SAVE_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/Qwen-Image-Residual/logs/residual_eval"
-BASE_GENEVAL_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/outputs-qwenimage/residual_eval"
-BASE_T2I_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/T2I-CompBench/output-qwenimage"
-DPG_SAVE_BASE="/inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench/outputs-qwenimage"
-mkdir -p "$BASE_SAVE_DIR" "$BASE_GENEVAL_DIR" "$BASE_T2I_DIR" "$DPG_SAVE_BASE"
 
+
+# =============== 输出目录配置 ===============================
+BASE_GENEVAL_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/outputs-qwenimage/residual_eval"
 
 GENEVAL_DIR_LIST=()
-SAMPLE_DIR_LIST=()
-DPG_DIR_LIST=()    
-T2I_DIR_LIST=()  
 
 
 # ============================================================
@@ -58,11 +55,10 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
 
 
+    GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"
 
-    DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
     # 保存目录列表用于后续 Stage
-    DPG_DIR_LIST+=("$DPG_OUTDIR")
-
+    GENEVAL_DIR_LIST+=("$GENEVAL_OUTDIR")
 done
 done
 done
@@ -78,38 +74,36 @@ echo
 
 
 
+
+
 # ============================================================
-# =============== 阶段 4：DPG Bench 测评 =============
+# =============== 阶段 2：Geneval 测评 =======================
 # ============================================================
 echo "============================================"
-echo " Phase 4: Running DPG Bench evaluation (official) "
+echo " Phase 2: Running Geneval evaluation "
 echo "============================================"
 
-DPG_BENCH_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench"
-DPG_RESOLUTION=1024   # 单格尺寸，官方要求
 
+MASK2FORMER_PATH="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/mask2former"
 
-# cd /inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench
-# source /inspire/hdd/project/chineseculture/public/yuxuan/REPA-sd3-1/ELLA/.venv/bin/activate
-
-
-# 为每个 residual 实验进行 DPG 测评
-for DPG_OUTDIR in "${DPG_DIR_LIST[@]}"; do
-
-    DPG_EVAL_RES="${DPG_SAVE_BASE}/results/${EXP_NAME}.txt"
-
+for GENEVAL_OUTDIR in "${GENEVAL_DIR_LIST[@]}"; do
     echo "----------------------------------------------------"
-    echo " Evaluating DPG directory: $DPG_OUTDIR"
+    echo " Evaluating Geneval directory:"
+    echo "   $GENEVAL_OUTDIR"
     echo "----------------------------------------------------"
 
-    python compute_dpg_bench.py \
-        --image-root-path "$DPG_OUTDIR" \
-        --resolution $DPG_RESOLUTION
-        # --res-path "$DPG_EVAL_RES" \
+    STEP_NAME=$(basename "$GENEVAL_OUTDIR")
+    OUTFILE_PARENT=$(dirname "$GENEVAL_OUTDIR")
+    GENEVAL_OUTFILE="${OUTFILE_PARENT}/results_${STEP_NAME}.jsonl"
 
-    echo "DPG evaluation finished: $DPG_OUTDIR"
-    echo "    → Log file: "$DPG_EVAL_RES""
+    python evaluation/evaluate_images.py \
+        "$GENEVAL_OUTDIR" \
+        --outfile "$GENEVAL_OUTFILE" \
+        --model-path "$MASK2FORMER_PATH"
+
+    python evaluation/summary_scores.py \
+        "$GENEVAL_OUTFILE"
+
+    echo "🎉 Geneval evaluation finished: $STEP_NAME"
     echo
 done
-
-echo "🎉 All DPG Bench evaluations completed!"

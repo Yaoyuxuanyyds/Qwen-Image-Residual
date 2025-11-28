@@ -7,29 +7,21 @@ set -euo pipefail
 # ============================================================
 # =============== 参数列表（可自由扩展） =====================
 # ============================================================
-RES_ORIGIN_LIST=(0)
+RES_ORIGIN_LIST=(3)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 2)"
+    "$(seq -s ' ' 4 22)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.0 %.0s' $(seq 2))"
+    "$(printf '0.25 %.0s' $(seq 4 22))"
 )
 
 
 # =============== 输出目录配置 ===============================
-BASE_SAVE_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/Qwen-Image-Residual/logs/residual_eval"
-BASE_GENEVAL_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/outputs-qwenimage/residual_eval"
-BASE_T2I_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/T2I-CompBench/output-qwenimage"
 DPG_SAVE_BASE="/inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench/outputs-qwenimage"
-mkdir -p "$BASE_SAVE_DIR" "$BASE_GENEVAL_DIR" "$BASE_T2I_DIR" "$DPG_SAVE_BASE"
-
-
-GENEVAL_DIR_LIST=()
-SAMPLE_DIR_LIST=()
 DPG_DIR_LIST=()    
-T2I_DIR_LIST=()  
+
 
 
 # ============================================================
@@ -57,11 +49,11 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
 
     EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
 
-
-
     DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
+
     # 保存目录列表用于后续 Stage
     DPG_DIR_LIST+=("$DPG_OUTDIR")
+
 
 done
 done
@@ -69,9 +61,6 @@ done
 
 echo "🎉🎉 All residual experiments completed!"
 echo
-
-
-
 
 
 

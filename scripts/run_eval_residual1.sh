@@ -27,11 +27,11 @@ BATCHSIZE=16
 RES_ORIGIN_LIST=(1)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 3 44)"
+    "$(seq -s ' ' 2 24)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.1 %.0s' $(seq 3 44))"
+    "$(printf '0.25 %.0s' $(seq 2 24))"
 )
 
 
@@ -72,7 +72,10 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
+
+
+
 
     SAVEDIR="${BASE_SAVE_DIR}/${EXP_NAME}"
     GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"
@@ -87,29 +90,29 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     echo "→ T2I_OUTDIR:     $T2I_OUTDIR"
 
 
-    # # ① Geneval 多卡并行生成
-    # echo "📌 Running GenEval bench generation (multi-GPU)..."
+    # ① Geneval 多卡并行生成
+    echo "📌 Running GenEval bench generation (multi-GPU)..."
 
-    # WORLD_SIZE=8   # 你要用的 GPU 数量（可改成你自己的量）
+    WORLD_SIZE=8   # 你要用的 GPU 数量（可改成你自己的量）
 
-    # for RANK in $(seq 0 $((WORLD_SIZE-1))); do
-    #     CUDA_VISIBLE_DEVICES=$RANK python generate_geneval.py \
-    #         --seed 42 \
-    #         --batch_size $BATCHSIZE \
-    #         --model_dir $MODEL_DIR \
-    #         --metadata_file /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/prompts/evaluation_metadata.jsonl \
-    #         --outdir "$GENEVAL_OUTDIR" \
-    #         --residual_target_layers $RES_TARGET \
-    #         --residual_origin_layer $RES_ORIGIN \
-    #         --residual_weight $RES_WEIGHT \
-    #         --world_size $WORLD_SIZE \
-    #         --rank $RANK \
-    #         --skip_grid \
-    #         > "${GENEVAL_OUTDIR}/log_rank${RANK}.txt" 2>&1 &
-    # done
+    for RANK in $(seq 0 $((WORLD_SIZE-1))); do
+        CUDA_VISIBLE_DEVICES=$RANK python generate_geneval.py \
+            --seed 42 \
+            --batch_size $BATCHSIZE \
+            --model_dir $MODEL_DIR \
+            --metadata_file /inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/prompts/evaluation_metadata.jsonl \
+            --outdir "$GENEVAL_OUTDIR" \
+            --residual_target_layers $RES_TARGET \
+            --residual_origin_layer $RES_ORIGIN \
+            --residual_weight $RES_WEIGHT \
+            --world_size $WORLD_SIZE \
+            --rank $RANK \
+            --skip_grid \
+            > "${GENEVAL_OUTDIR}/log_rank${RANK}.txt" 2>&1 &
+    done
 
-    # wait
-    # echo "🎉 GenEval multi-GPU generation finished!"
+    wait
+    echo "🎉 GenEval multi-GPU generation finished!"
 
 
 
@@ -119,7 +122,6 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
         CUDA_VISIBLE_DEVICES=$GPU_ID python generate_dpg.py \
             --save_dir "$DPG_OUTDIR" \
             --img_size $IMGSIZE \
-            --batch_size $BATCHSIZE \
             --residual_target_layers $RES_TARGET \
             --residual_origin_layer $RES_ORIGIN \
             --residual_weight $RES_WEIGHT \
@@ -133,31 +135,31 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
 
 
 
-    # echo "📌 Running Multi-GPU Generation..."
-    # WORLD_SIZE=8
-    # for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
-    #     CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
-    #         --outdir_base "${T2I_OUTDIR}" \
-    #         --output_prefix "qwen_residual" \
-    #         --residual_target_layers $RES_TARGET \
-    #         --residual_origin_layer $RES_ORIGIN \
-    #         --residual_weight $RES_WEIGHT \
-    #         --world_size $WORLD_SIZE \
-    #         --rank $GPU_ID \
-    #         > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
-    # done
+    echo "📌 Running Multi-GPU Generation..."
+    WORLD_SIZE=8
+    for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
+        CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
+            --outdir_base "${T2I_OUTDIR}" \
+            --output_prefix "qwen_residual" \
+            --residual_target_layers $RES_TARGET \
+            --residual_origin_layer $RES_ORIGIN \
+            --residual_weight $RES_WEIGHT \
+            --world_size $WORLD_SIZE \
+            --rank $GPU_ID \
+            > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
+    done
 
-    # wait
-    # echo "🎉 T2I generation finished."
+    wait
+    echo "🎉 T2I generation finished."
 
-    # # sample.py 生成图片
-    # echo "📌 Running Basic bench generation..."
-    # python sample.py \
-    #     --cfg_scale $CFG --NFE $NFE --model $MODEL --img_size $IMGSIZE --batch_size $BATCHSIZE \
-    #     --save_dir "$SAVEDIR" --datadir "$DATADIR" --num $NUM_SAMPLES --dataset "$DATASET" \
-    #     --residual_target_layers $RES_TARGET \
-    #     --residual_origin_layer $RES_ORIGIN \
-    #     --residual_weight $RES_WEIGHT
+    # # # sample.py 生成图片
+    # # echo "📌 Running Basic bench generation..."
+    # # python sample.py \
+    # #     --cfg_scale $CFG --NFE $NFE --model $MODEL --img_size $IMGSIZE --batch_size $BATCHSIZE \
+    # #     --save_dir "$SAVEDIR" --datadir "$DATADIR" --num $NUM_SAMPLES --dataset "$DATASET" \
+    # #     --residual_target_layers $RES_TARGET \
+    # #     --residual_origin_layer $RES_ORIGIN \
+    # #     --residual_weight $RES_WEIGHT
 
 
 
@@ -173,6 +175,8 @@ done
 
 echo "🎉🎉 All residual experiments completed!"
 echo
+
+
 
 
 

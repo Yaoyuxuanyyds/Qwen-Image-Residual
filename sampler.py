@@ -138,7 +138,7 @@ class MyQwenImagePipeline(QwenImagePipeline):
         # 拷贝参数
         my_transformer.load_state_dict(base_pipe.transformer.state_dict())
 
-        # ⭐⭐⭐ 必须：让 dtype 匹配 pipe（bfloat16）
+        # 让 dtype 匹配 pipe（bfloat16）
         my_transformer.to(base_pipe.transformer.dtype)
 
         # 设置 residual
@@ -372,7 +372,7 @@ class MyQwenImagePipeline(QwenImagePipeline):
 
 
         # --------------------------
-        # 5收集文本特征
+        # 5. 收集文本特征
         # --------------------------
         collect = collect_layers is not None
         if collect:
@@ -411,6 +411,7 @@ class MyQwenImagePipeline(QwenImagePipeline):
                         
                     # 收集文本特征 
                     if collect:
+                        # # origin layer0
                         # layer0
                         text_feats_dict[0].append(out["context_embedder_output"][0].detach().cpu())
                         # others

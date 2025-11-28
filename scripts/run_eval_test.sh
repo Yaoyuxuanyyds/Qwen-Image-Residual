@@ -27,11 +27,11 @@ BATCHSIZE=16
 RES_ORIGIN_LIST=(0)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 2)"
+    "$(seq -s ' ' 1)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.0 %.0s' $(seq 2))"
+    "$(printf '0.0 %.0s' $(seq 1))"
 )
 
 
@@ -40,13 +40,15 @@ BASE_SAVE_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/Qwen-Image-Resi
 BASE_GENEVAL_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/geneval/outputs-qwenimage/residual_eval"
 BASE_T2I_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/T2I-CompBench/output-qwenimage"
 DPG_SAVE_BASE="/inspire/hdd/project/chineseculture/public/yuxuan/benches/ELLA/dpg_bench/outputs-qwenimage"
-mkdir -p "$BASE_SAVE_DIR" "$BASE_GENEVAL_DIR" "$BASE_T2I_DIR" "$DPG_SAVE_BASE"
+ONEIG_SAVE_DIR="/inspire/hdd/project/chineseculture/public/yuxuan/benches/OneIG-Benchmark/outputs-qwenimage"
+mkdir -p "$BASE_SAVE_DIR" "$BASE_GENEVAL_DIR" "$BASE_T2I_DIR" "$DPG_SAVE_BASE" "$ONEIG_SAVE_DIR"
 
 
 GENEVAL_DIR_LIST=()
 SAMPLE_DIR_LIST=()
 DPG_DIR_LIST=()    
 T2I_DIR_LIST=()  
+ONEIG_DIR_LIST=() 
 
 
 # ============================================================
@@ -81,8 +83,9 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"
     DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
     T2I_OUTDIR="${BASE_T2I_DIR}/${EXP_NAME}"
+    ONEIG_OUTDIR="${ONEIG_SAVE_DIR}/${EXP_NAME}"
 
-    mkdir -p "$SAVEDIR" "$GENEVAL_OUTDIR" "$DPG_OUTDIR" "$T2I_OUTDIR"
+    mkdir -p "$SAVEDIR" "$GENEVAL_OUTDIR" "$DPG_OUTDIR" "$T2I_OUTDIR" "$ONEIG_OUTDIR"
 
     # # ① Geneval 多卡并行生成
     # echo "📌 Running GenEval bench generation (multi-GPU)..."
@@ -110,22 +113,22 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
 
 
 
-    echo "📌 Running DPG bench generation on 8 GPUs..."
-    WORLD_SIZE=8
-    for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
-        CUDA_VISIBLE_DEVICES=$GPU_ID python generate_dpg.py \
-            --save_dir "$DPG_OUTDIR" \
-            --img_size $IMGSIZE \
-            --residual_target_layers $RES_TARGET \
-            --residual_origin_layer $RES_ORIGIN \
-            --residual_weight $RES_WEIGHT \
-            --world_size $WORLD_SIZE \
-            --rank $GPU_ID \
-            > "${DPG_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
-    done
+    # echo "📌 Running DPG bench generation on 8 GPUs..."
+    # WORLD_SIZE=8
+    # for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
+    #     CUDA_VISIBLE_DEVICES=$GPU_ID python generate_dpg.py \
+    #         --save_dir "$DPG_OUTDIR" \
+    #         --img_size $IMGSIZE \
+    #         --residual_target_layers $RES_TARGET \
+    #         --residual_origin_layer $RES_ORIGIN \
+    #         --residual_weight $RES_WEIGHT \
+    #         --world_size $WORLD_SIZE \
+    #         --rank $GPU_ID \
+    #         > "${DPG_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
+    # done
 
-    wait    # <-- 必须等待所有并行任务完成
-    echo "🎉 DPG multi-GPU generation finished!"
+    # wait    # <-- 必须等待所有并行任务完成
+    # echo "🎉 DPG multi-GPU generation finished!"
 
 
 
@@ -146,6 +149,17 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     # wait
     # echo "🎉 T2I generation finished."
 
+    WORLD=8
+    for R in $(seq 0 $((WORLD-1))); do
+    CUDA_VISIBLE_DEVICES=$R python generate_oneig.py \
+        --image_dir "${ONEIG_OUTDIR}" \
+        --model_name "qwen_residaul_en" \
+        --lang en \
+        --world_size $WORLD --rank $R \
+        > "${ONEIG_OUTDIR}/log_rank$R.txt" 2>&1 &
+    done
+    wait
+
     # # sample.py 生成图片
     # echo "📌 Running Basic bench generation..."
     # python sample.py \
@@ -162,6 +176,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     SAMPLE_DIR_LIST+=("$SAVEDIR")
     DPG_DIR_LIST+=("$DPG_OUTDIR")
     T2I_DIR_LIST+=("$T2I_OUTDIR")
+    ONEIG_DIR_LIST+=("$ONEIG_OUTDIR")
 
 done
 done

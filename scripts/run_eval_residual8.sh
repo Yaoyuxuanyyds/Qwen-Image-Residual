@@ -27,11 +27,11 @@ BATCHSIZE=16
 RES_ORIGIN_LIST=(1)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 2 24)"
+    "$(seq -s ' ' 2 11)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.5 %.0s' $(seq 2 24))"
+    "$(printf '0.25 %.0s' $(seq 2 11))"
 )
 
 
@@ -73,9 +73,6 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
     EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
-
-
-
 
     SAVEDIR="${BASE_SAVE_DIR}/${EXP_NAME}"
     GENEVAL_OUTDIR="${BASE_GENEVAL_DIR}/${EXP_NAME}"
@@ -135,22 +132,22 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
 
 
 
-    echo "📌 Running Multi-GPU Generation..."
-    WORLD_SIZE=8
-    for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
-        CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
-            --outdir_base "${T2I_OUTDIR}" \
-            --output_prefix "qwen_residual" \
-            --residual_target_layers $RES_TARGET \
-            --residual_origin_layer $RES_ORIGIN \
-            --residual_weight $RES_WEIGHT \
-            --world_size $WORLD_SIZE \
-            --rank $GPU_ID \
-            > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
-    done
+    # echo "📌 Running Multi-GPU Generation..."
+    # WORLD_SIZE=8
+    # for GPU_ID in $(seq 0 $((WORLD_SIZE-1))); do
+    #     CUDA_VISIBLE_DEVICES=$GPU_ID python generate_t2i.py \
+    #         --outdir_base "${T2I_OUTDIR}" \
+    #         --output_prefix "qwen_residual" \
+    #         --residual_target_layers $RES_TARGET \
+    #         --residual_origin_layer $RES_ORIGIN \
+    #         --residual_weight $RES_WEIGHT \
+    #         --world_size $WORLD_SIZE \
+    #         --rank $GPU_ID \
+    #         > "${T2I_OUTDIR}/log_gpu${GPU_ID}.txt" 2>&1 &
+    # done
 
-    wait
-    echo "🎉 T2I generation finished."
+    # wait
+    # echo "🎉 T2I multi-GPU generation finished."
 
     # # # sample.py 生成图片
     # # echo "📌 Running Basic bench generation..."
@@ -175,12 +172,6 @@ done
 
 echo "🎉🎉 All residual experiments completed!"
 echo
-
-
-
-
-
-
 
 
 

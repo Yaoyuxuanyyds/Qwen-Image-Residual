@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # ================================================================
-#    Qwen-Image Text Token Analysis (CKNNA / Cos / PCA)
+#    Qwen-Image Text Token Analysis (CKNNA / Cos / PCA / UMAP / t-SNE)
 #    - Uses MyQwenImagePipeline.__call__ with collect_layers
 #    - No manual VAE encode / pack / scheduling
 #    - Uses target_timestep to extract transformer text features
+#    - PCA / UMAP / t-SNE all fitted on concatenated features of ALL layers
 # ================================================================
 
 import argparse
 import math
 import os
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -103,8 +104,20 @@ def pil_to_tensor(img: Image.Image, device: torch.device):
     return ToTensor()(img).unsqueeze(0).to(device)
 
 
+def fix_feat_shape(f: torch.Tensor) -> torch.Tensor:
+    """
+    将 [1, T, D] 或 [B, T, D] 变成 [T, D]。
+    """
+    if f.dim() == 3:
+        if f.shape[0] == 1:
+            return f.squeeze(0)   # [1,T,D] → [T,D]
+        else:
+            return f.reshape(-1, f.shape[-1])  # [B,T,D] → [B*T,D]
+    return f
+
+
 # ================================================================
-# PCA
+# PCA & global embedding helpers
 # ================================================================
 def fit_pca(all_features):
     from sklearn.decomposition import PCA
@@ -123,7 +136,7 @@ def add_subplot_border(ax, color="gray", lw: float = 1.0):
         spine.set_linewidth(lw)
 
 
-def plot_pca(layer_tokens, pca, outdir, layers):
+def plot_pca(layer_tokens, pca, outdir, layers, layer_stats):
     if pca is None:
         print("[WARN] PCA skipped, insufficient data.")
         return
@@ -137,17 +150,29 @@ def plot_pca(layer_tokens, pca, outdir, layers):
     for i, layer in enumerate(layers):
         ax = axes[i]
         feats = layer_tokens[i]
+
         if feats is not None and feats.shape[0] > 2:
             pts = pca.transform(feats)
-            split = 77 if pts.shape[0] >= 333 else min(77, pts.shape[0])
-            if split > 0:
-                ax.scatter(pts[:split, 0], pts[:split, 1], s=6, alpha=0.3, color="royalblue")
-            if pts.shape[0] - split > 0:
-                ax.scatter(pts[split:, 0], pts[split:, 1], s=6, alpha=0.3, color="tomato")
+            ax.scatter(pts[:, 0], pts[:, 1], s=6, alpha=0.3, color="tomato")
+
+        # ---- NEW: annotate stats ----
+        if layer in layer_stats:
+            m = layer_stats[layer]["mean"]
+            s = layer_stats[layer]["std"]
+            ax.text(
+                0.01, 0.99,
+                f"μ={m:.2f}\nσ={s:.2f}",
+                transform=ax.transAxes,
+                fontsize=7,
+                verticalalignment="top",
+                bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=2)
+            )
+
         ax.set_title(f"Layer {layer}", fontsize=10)
         ax.set_xticks([])
         ax.set_yticks([])
         add_subplot_border(ax)
+
 
     for j in range(i + 1, len(axes)):
         axes[j].axis("off")
@@ -174,6 +199,119 @@ def plot_curves(results, outpath):
     plt.tight_layout()
     plt.savefig(outpath, dpi=200)
     plt.close()
+
+
+# >>> 新增：把所有层的特征拼成一个矩阵，并记录每层在全局矩阵中的区间
+def build_global_matrix(layer_tokens_np: List[Optional[np.ndarray]]) -> Tuple[Optional[np.ndarray], List[Tuple[int,int]]]:
+    """
+    返回：
+      X_all: [N_all, D]
+      spans: len == num_layers, 每个元素是 (start, end)，用于从 X_all / embedding 中取出对应层数据
+    """
+    arrays = []
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    for arr in layer_tokens_np:
+        if arr is None or arr.shape[0] == 0:
+            spans.append((start, start))
+            continue
+        n = arr.shape[0]
+        arrays.append(arr)
+        end = start + n
+        spans.append((start, end))
+        start = end
+
+    if not arrays:
+        return None, spans
+
+    X_all = np.concatenate(arrays, axis=0)
+    return X_all, spans
+
+
+# >>> 新增：UMAP / t-SNE 拟合（在全局矩阵上）
+def fit_umap_global(X: Optional[np.ndarray]):
+    if X is None or X.shape[0] < 3:
+        print("[WARN] UMAP skipped, insufficient data.")
+        return None
+    try:
+        import umap
+    except ImportError:
+        print("[WARN] umap-learn not installed; skip UMAP.")
+        return None
+
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=15,
+        min_dist=0.1,
+        metric="euclidean",
+        random_state=42,
+    )
+    emb = reducer.fit_transform(X)
+    return emb
+
+
+def fit_tsne_global(X: Optional[np.ndarray]):
+    if X is None or X.shape[0] < 3:
+        print("[WARN] t-SNE skipped, insufficient data.")
+        return None
+    try:
+        from sklearn.manifold import TSNE
+    except ImportError:
+        print("[WARN] sklearn.manifold.TSNE not available; skip t-SNE.")
+        return None
+
+    # 注意：大样本时 t-SNE 很慢，这里只做 2D 可视化用途
+    tsne = TSNE(
+        n_components=2,
+        perplexity=30.0,
+        init="pca",
+        learning_rate="auto",
+        random_state=42,
+    )
+    emb = tsne.fit_transform(X)
+    return emb
+
+
+# >>> 新增：根据全局 embedding + spans，按层画 UMAP / t-SNE
+def plot_embedding_per_layer(
+    emb: Optional[np.ndarray],
+    spans: List[Tuple[int, int]],
+    layers: Sequence[int],
+    outdir: str,
+    tag: str = "umap",
+):
+    """
+    emb: [N_all,2]，是所有层共同空间的 2D 嵌入
+    spans[i] = (start,end)，表示第 i 个 layer 在 emb 中的 slice
+    """
+    if emb is None:
+        return
+
+    n = len(layers)
+    nc = min(6, n)
+    nr = math.ceil(n / nc)
+    fig, axes = plt.subplots(nr, nc, figsize=(3 * nc, 3 * nr))
+    axes = axes.flatten()
+
+    for i, layer in enumerate(layers):
+        ax = axes[i]
+        start, end = spans[i]
+        coords = emb[start:end]
+        if coords.shape[0] > 0:
+            ax.scatter(coords[:, 0], coords[:, 1], s=6, alpha=0.3, color="tomato")
+        ax.set_title(f"Layer {layer}", fontsize=10)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        add_subplot_border(ax)
+
+    for j in range(i + 1, len(axes)):
+        axes[j].axis("off")
+
+    fig.tight_layout()
+    outfile = os.path.join(outdir, f"text_emb_{tag}.png")
+    fig.savefig(outfile, dpi=200)
+    plt.close(fig)
+    print(f"[SAVE] {outfile}")
 
 
 # ================================================================
@@ -219,18 +357,6 @@ def iterate_pairs(dataset, total, args):
         for i in range(total):
             img, txt = extract_pair(dataset[i])
             yield i, img, txt
-            
-def fix_feat_shape(f: torch.Tensor) -> torch.Tensor:
-    """
-    将 [1, T, D] 或 [B, T, D] 变成 [T, D]。
-    """
-    if f.dim() == 3:
-        if f.shape[0] == 1:
-            return f.squeeze(0)   # [1,T,D] → [T,D]
-        else:
-            # [B,T,D] → 展平 batch → 合并
-            return f.reshape(-1, f.shape[-1])
-    return f
 
 
 # ================================================================
@@ -257,7 +383,6 @@ def run(args):
     layerX_all = {l: [] for l in target_layers}
     cknna_vals = {l: [] for l in target_layers}
     cosine_vals = {l: [] for l in target_layers}
-    token_lengths = []
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -265,15 +390,17 @@ def run(args):
     for idx, img_in, prompt in iterate_pairs(dataset, total, args):
         print(f"\n=== [{idx+1}/{total}] Prompt: {prompt[:60]} ===")
 
+        # 这里只用 prompt，不使用 img_in（走标准 T2I 推理）
+        gen = torch.Generator(device=device)
+        gen.manual_seed(args.seed + idx)
 
-        # Run full official pipeline; collect text features
         out = pipe(
             prompt=prompt,
             negative_prompt=" ",
             width=args.width,
             height=args.height,
             true_cfg_scale=4.0,
-            generator=torch.Generator(device="cuda").manual_seed(42),
+            generator=gen,
             collect_layers=target_layers,
             target_timestep=args.timestep_idx,
             num_inference_steps=args.num_inference_steps,
@@ -284,7 +411,6 @@ def run(args):
         # Layer 0
         layer0 = fix_feat_shape(txt_dict[0][-1].float())
         layer0_all.append(layer0.cpu())
-        token_lengths.append(layer0.shape[0])
 
         # Other layers
         for l in target_layers:
@@ -299,27 +425,89 @@ def run(args):
     # Summary
     results = []
     for l in target_layers:
-        mean_ck = float(np.mean(cknna_vals[l]))
-        mean_co = float(np.mean(cosine_vals[l]))
+        mean_ck = float(np.mean(cknna_vals[l])) if cknna_vals[l] else float("nan")
+        mean_co = float(np.mean(cosine_vals[l])) if cosine_vals[l] else float("nan")
         results.append((l, mean_ck, mean_co))
         print(f"Layer {l}: CKNNA={mean_ck:.4f}, Cos={mean_co:.4f}")
 
     plot_curves(results, os.path.join(args.output_dir, args.output_name))
 
-    # PCA
-    layer_tokens_np = []
+    # ====== 构建各层特征（下采样后） ======
+    layer_stats = {}
+    layer_tokens_np: List[Optional[np.ndarray]] = []
     for l in all_layers:
         toks = layer0_all if l == 0 else layerX_all[l]
         if len(toks) == 0:
             layer_tokens_np.append(None)
         else:
             feats = torch.cat(toks, dim=0)
+
+            # ======================================================
+            # NEW: record pre-normalization stats (scalar mean/std)
+            # ======================================================
+            pre_mean_vec = feats.mean(-1, keepdims=True).cpu().numpy()   # shape [1, D]
+            pre_std_vec  = feats.std(-1, keepdims=True).cpu().numpy()    # shape [1, D]
+            layer_stats[l] = {
+                "mean": float(pre_mean_vec.mean()),     # scalar mean
+                "std": float(pre_std_vec.mean()),       # scalar std
+            }
+
+            # ======================================================
+            # optional per-layer normalization
+            # ======================================================
+            if args.normalize_layers:
+                feats = feats - feats.mean(-1, keepdims=True)
+                feats = feats / (feats.std(-1, keepdims=True) + 1e-6)
+
+                
             if args.vis_sample_size > 0 and feats.shape[0] > args.vis_sample_size:
                 feats = feats[torch.randperm(feats.shape[0])[:args.vis_sample_size]]
             layer_tokens_np.append(feats.numpy())
 
+    # ====== PCA（全局拟合，原逻辑保留） ======
     pca = fit_pca(layer_tokens_np)
-    plot_pca(layer_tokens_np, pca, args.output_dir, all_layers)
+    plot_pca(layer_tokens_np, pca, args.output_dir, all_layers, layer_stats)
+
+    # ================================================================
+    # 新增：layer0 tokens 单独 PCA（只对 layer0 拟合）
+    # ================================================================
+    print("[INFO] Fitting PCA ONLY on layer0 tokens (single-layer PCA)...")
+
+    # layer0 的特征在 layer_tokens_np[0]
+    layer0_np = layer_tokens_np[0]
+
+    if layer0_np is None or layer0_np.shape[0] < 3:
+        print("[WARN] layer0 tokens insufficient for PCA, skip.")
+    else:
+        from sklearn.decomposition import PCA
+
+        pca0 = PCA(n_components=2, random_state=42).fit(layer0_np)
+        pts0 = pca0.transform(layer0_np)
+
+        # ---- 绘图 ----
+        fig = plt.figure(figsize=(5, 5))
+        plt.scatter(pts0[:, 0], pts0[:, 1], s=6, alpha=0.35, color="steelblue")
+        plt.title("Layer0 Only PCA", fontsize=12)
+        plt.xticks([])
+        plt.yticks([])
+        plt.grid(alpha=0.2)
+
+        out_png = os.path.join(args.output_dir, "text_emb_layer0_pca.png")
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=200)
+        plt.close()
+
+        print(f"[SAVE] {out_png}")
+
+
+    # # ====== UMAP / t-SNE：在所有层拼接的共同空间中拟合，然后按层可视化 ======
+    # X_all, spans = build_global_matrix(layer_tokens_np)
+
+    # umap_emb = fit_umap_global(X_all)
+    # plot_embedding_per_layer(umap_emb, spans, all_layers, args.output_dir, tag="umap")
+
+    # tsne_emb = fit_tsne_global(X_all)
+    # plot_embedding_per_layer(tsne_emb, spans, all_layers, args.output_dir, tag="tsne")
 
 
 # ================================================================
@@ -333,6 +521,7 @@ def parse_args():
     p.add_argument("--dataset", type=str, nargs="+", default=None)
     p.add_argument("--datadir", type=str, default=None)
     p.add_argument("--dataset-train", action="store_true")
+    p.add_argument("--normalize-layers", action="store_true")
     p.add_argument("--num-samples", type=int, default=-1)
 
     p.add_argument("--timestep-idx", type=int, required=True)

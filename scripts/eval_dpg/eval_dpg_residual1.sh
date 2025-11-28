@@ -10,11 +10,11 @@ set -euo pipefail
 RES_ORIGIN_LIST=(1)
 
 RES_TARGET_LIST=(
-    "$(seq -s ' ' 3 44)"
+    "$(seq -s ' ' 2 24)"
 )
 
 RES_WEIGHT_LIST=(
-    "$(printf '0.1 %.0s' $(seq 3 44))"
+    "$(printf '0.25 %.0s' $(seq 2 24))"
 )
 
 
@@ -48,7 +48,7 @@ for RES_WEIGHT in "${RES_WEIGHT_LIST[@]}"; do
     FIRST_WEIGHT=$(echo "$RES_WEIGHT" | awk '{print $1}')
     EXP_WEIGHT_SHORT="${FIRST_WEIGHT}"
 
-    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}"
+    EXP_NAME="target-${EXP_TARGET_SHORT}__origin-${RES_ORIGIN}__w-${EXP_WEIGHT_SHORT}-LayerNorm"
 
     DPG_OUTDIR="${DPG_SAVE_BASE}/${EXP_NAME}"
 
@@ -95,8 +95,8 @@ for DPG_OUTDIR in "${DPG_DIR_LIST[@]}"; do
 
     python compute_dpg_bench.py \
         --image-root-path "$DPG_OUTDIR" \
-        --res-path "$DPG_EVAL_RES" \
         --resolution $DPG_RESOLUTION
+        # --res-path "$DPG_EVAL_RES" \
 
     echo "DPG evaluation finished: $DPG_OUTDIR"
     echo "    → Log file: "$DPG_EVAL_RES" "
